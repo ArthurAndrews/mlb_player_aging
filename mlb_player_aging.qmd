@@ -1,0 +1,148 @@
+---
+title: MLB player aging
+author: Arthur Andrews
+format: html
+editor: source
+embed-resources: true
+fig-format: svg
+---
+
+```{r load-packages}
+#| warning: false
+#| message: false
+library(tidyverse)
+library(lme4, exclude = c("expand", "pack", "unpack"))
+library(broom.mixed)
+library(janitor)
+library(splines)
+library(factoextra)
+library(magrittr, include.only = "set_rownames")
+```
+
+```{r load-data}
+load("data/hitting_stats.RData")
+```
+
+```{r}
+theme_set(theme_bw())
+```
+
+
+```{r functions}
+predict_splines <- function(x, model) {
+  x |> 
+    predict(object = model) |> 
+    as_tibble() |> 
+    mutate(across(everything(), as.numeric)) |> 
+    rename_with(.fn = \(x) str_c("spline", x))    
+}
+
+
+add_splines <- function(hit, model) {
+  
+  hit |> 
+    select(-contains("spline")) |> 
+    bind_cols(
+      hit$centered_age |> 
+        predict_splines(model)
+    )
+}
+
+
+add_prediction <- function(hit, model, ...) {
+  hit$pred_ops <- predict(model, hit, ...)
+  hit
+}
+```
+
+```{r}
+hit <- hit |> 
+  filter(n_seasons >= 5) 
+
+df <- 3
+```
+
+```{r}
+age_range <- seq(
+  hit$centered_age |> min(),
+  hit$centered_age |> max(),
+  length.out = 500
+)
+
+spline_model <- age_range |> 
+  bs(df = df)
+```
+
+```{r}
+hit <- hit |> 
+  add_splines(spline_model)
+```
+
+```{r}
+hit |> 
+  select(age, contains("spline")) |> 
+  pivot_longer(-age) |> 
+  ggplot() + 
+  aes(age, value, color = name) + 
+  geom_line()
+```
+
+```{r}
+form1 <- ops ~ (spline1 + spline2 + spline3 | name) + spline1 + spline2 + spline3
+model1 <- lmer(form1, hit)
+model1
+```
+
+```{r}
+mean_player <- tibble(age = 19:40, centered_age = age - mean(hit$age)) |> 
+  add_splines(spline_model) |> 
+  add_prediction(model1, re.form = ~0)
+```
+
+```{r}
+grouped_hit <- hit |> 
+  mutate(across(age, floor)) |> 
+  group_by(id) |> 
+  mutate(
+    age_28_season = age == 28,
+    age_28_ops = if (any(age_28_season)) mean(ops[age_28_season]) else NA,
+    age_28_pa = if (any(age_28_season)) mean(pa[age_28_season]) else NA
+  ) |> 
+  ungroup() |> 
+  group_by(age = floor(age)) |> 
+  mutate(player_contribution = pa / sum(pa)) 
+
+aggregate_player <- grouped_hit |> 
+  summarize(
+    across(c(avg, obp, slg, ops), \(x) weighted.mean(x, pa)),
+    age_28_ops = weighted.mean(age_28_ops, age_28_pa, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+aggregate_player
+```
+```{r}
+aggregate_player |> 
+  ggplot() + 
+  aes(age, ops) + 
+  geom_line()
+```
+```{r}
+grouped_hit |> 
+  slice_max(player_contribution, n = 5) |> 
+  ungroup() |> 
+  select(age, name, player_contribution)
+```
+
+```{r}
+aging <- mean_player |> 
+  left_join(aggregate_player, by = "age") 
+```
+
+```{r}
+aging |> 
+  select(age, modeled = pred_ops, aggregate = ops) |> 
+  pivot_longer(-age) |> 
+  ggplot() + aes(age, value, color = name) + geom_line()
+```
+
