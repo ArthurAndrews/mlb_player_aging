@@ -5,7 +5,33 @@ format: html
 editor: source
 embed-resources: true
 fig-format: svg
+code-fold: true
 ---
+
+# Goals
+
+  - Study the aging of MLB player performance 
+  - Reveal the bias of estimating aging curves with simple aggregation
+  - Demonstrate a statistics model for aging using splines and mixed effects modeling
+  - Show some players whose aging curves are unusual or exceptional
+  
+# Purpose
+
+This is just a personal hobby project.
+
+# Tools
+
+  - `R` (programming language)
+  - `baseballr` (an R interface to MLB data)
+  - `quarto` (publishing documents from code)
+  - `GitHub Pages` (hosting code and web pages)
+
+# Code
+
+The code in this html report is folded by default.  You may click on the |> Code icons to reveal it.
+
+The data loaded by this notebook was first prepared in a separate script that you may find in the code repository: `query_mlb.R`.
+
 
 ```{r load-packages}
 #| warning: false
