@@ -220,70 +220,69 @@ calc_zero_deriv(spline_model, model1) |>
 
 # Aggregation
 
+Instead of performing the more complex steps of engineering the splines and fitting the statistical model, it might be tempting to simply average OPS by player age to see the aging curve.
+
+This is what it looks like.
+
 ```{r}
 grouped_hit <- hit |> 
-  mutate(across(age, floor)) |> 
-  group_by(id) |> 
-  mutate(
-    age_28_season = age == 28,
-    age_28_ops = if (any(age_28_season)) mean(ops[age_28_season]) else NA,
-    age_28_pa = if (any(age_28_season)) mean(pa[age_28_season]) else NA
-  ) |> 
-  ungroup() |> 
   group_by(age = round(age)) |> 
   mutate(player_contribution = pa / sum(pa)) 
 
 aggregate_player <- grouped_hit |> 
   summarize(
     across(c(avg, obp, slg, ops), \(x) weighted.mean(x, pa)),
-    age_28_ops = weighted.mean(age_28_ops, age_28_pa, na.rm = TRUE),
     .groups = "drop"
-  ) |> 
-  mutate(centered_age = age - mean(hit$age), name = NA_character_) |> 
-  add_splines(spline_model) |> 
-  add_prediction(model1, allow.new.levels = TRUE)
-
-aggregate_player
+  ) 
 ```
+
 ```{r}
 aggregate_player |> 
   ggplot() + aes(age, ops) + geom_line(color = pal[2]) +
   labs(title = "ops aggregated by player age")
 ```
+
+This result looks substantially different from the fit aging curve.
+
+That's because it's subject to an omitted variable bias.  The players at the low age ranges (19, 20) and high (37, 38, ...) are all-star and hall-of-fame caliber players.  They distort the averages in these age ranges.
+
 ```{r}
-grouped_hit |> 
-  slice_max(player_contribution, n = 5) |> 
-  ungroup() |> 
-  select(age, name, player_contribution)
+tabulate_one_age <- function(ages) {
+  grouped_hit |> 
+    filter(age %in% ages) |> 
+    slice_max(player_contribution, n = 5) |> 
+    select(age, name, player_contribution) |> 
+    tabulate(
+      columns = list(
+        name = colDef(minWidth = 150),
+        player_contribution = colDef("player contribution", format = colFormat(percent = TRUE, digits = 1)))
+    )  
+}
+
+tabulate_one_age(20)
 ```
 
 ```{r}
-grouped_hit |> 
-  filter(age == 19) |> 
-  slice_max(player_contribution, n = 5) |> 
-  select(age, name, player_contribution) |> 
-  tabulate(
-    columns = list(
-      name = colDef(minWidth = 150),
-      player_contribution = colDef("player contribution", format = colFormat(percent = TRUE, digits = 1)))
-  )
+tabulate_one_age(21)
 ```
 
 ```{r}
-grouped_hit |> 
-  filter(age == 39) |> 
-  slice_max(player_contribution, n = 5) |> 
-  select(age, name, player_contribution) |> 
-  tabulate(
-    columns = list(
-      name = colDef(minWidth = 150),
-      player_contribution = colDef("player contribution", format = colFormat(percent = TRUE, digits = 1))
-    )
-  )
+tabulate_one_age(38)
 ```
 
 ```{r}
-aggregate_player |> 
+tabulate_one_age(39)
+```
+
+# Comparing the aggregate and modeled aging curves
+
+```{r}
+aging <- aggregate_player |> 
+  mutate(centered_age = age - mean(hit$age), name = NA_character_) |> 
+  add_splines(spline_model) |> 
+  add_prediction(model1, allow.new.levels = TRUE)
+
+aging |> 
   select(age, modeled = pred_ops, aggregate = ops) |> 
   pivot_longer(-age) |> 
   mutate(name = factor(name, c("modeled", "aggregate"))) |> 
