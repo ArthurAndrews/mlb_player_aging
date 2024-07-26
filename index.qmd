@@ -5,8 +5,10 @@ format: html
 editor: source
 embed-resources: true
 fig-format: svg
-code-fold: true
+code-fold: false
 ---
+
+![](data/player_aging2.png)
 
 # Goals
 
@@ -17,7 +19,7 @@ code-fold: true
   
 # Purpose
 
-This is just a personal hobby project.
+This is just a hobby project.
 
 # Tools
 
@@ -33,26 +35,35 @@ The code in this html report is folded by default.  You may click on the |> Code
 The data loaded by this notebook was first prepared in a separate script that you may find in the code repository: `query_mlb.R`.
 
 
+# Load packages and data
+
 ```{r load-packages}
 #| warning: false
 #| message: false
+
 library(tidyverse)
-library(lme4, exclude = c("expand", "pack", "unpack"))
 library(broom.mixed)
 library(janitor)
 library(splines)
 library(factoextra)
+library(reactable)
+library(ggsci)
 library(magrittr, include.only = "set_rownames")
+library(lme4, exclude = c("expand", "pack", "unpack"))
+library(htmltools, include.only = "css")
+library(pracma, include.only = c("fzero", "fderiv"))
+
+theme_set(theme_bw(base_size = 12))
 ```
 
 ```{r load-data}
 load("data/hitting_stats.RData")
 ```
 
-```{r}
-theme_set(theme_bw())
-```
 
+# Declare functions
+
+For predicting with a spline function and predicting with the stats model.
 
 ```{r functions}
 predict_splines <- function(x, model) {
@@ -65,7 +76,6 @@ predict_splines <- function(x, model) {
 
 
 add_splines <- function(hit, model) {
-  
   hit |> 
     select(-contains("spline")) |> 
     bind_cols(
@@ -79,21 +89,60 @@ add_prediction <- function(hit, model, ...) {
   hit$pred_ops <- predict(model, hit, ...)
   hit
 }
+
+
+tabulate <- partial(
+  reactable,
+  fullWidth = FALSE, highlight = TRUE, style = css(fontSize = "90%")
+)
 ```
+
+
+# Data set
+
+I accessed MLB hitter data from 2010-2023 using the excellent `baseballr` package, which offers convenient interfaces to the Statscast APIs to Baseball Reference data.
+
+I include 
+  - seasons with at least 200 plate appearances
+  - and hitters with at least 5 seasons 
 
 ```{r}
 hit <- hit |> 
   filter(n_seasons >= 5) 
-
-df <- 3
 ```
 
 ```{r}
-age_range <- seq(
-  hit$centered_age |> min(),
-  hit$centered_age |> max(),
-  length.out = 500
-)
+hit |> 
+  group_by(season) |> 
+  summarize(rows = n(), hitters = n_distinct(id)) |> 
+  tabulate(defaultPageSize = 15)
+```
+
+
+Print a glimpse of the data to see the schema and number of rows and columns.
+
+```{r}
+glimpse(hit)
+```
+
+# Splines
+
+I will use three B-splines to provide a flexible basis for describing the nonlinear aging curve.
+
+Each of these splines is a smooth function of player age, and by including the split fits as predictor variables in a model, the model will be able to describe a nonlinear relationship between age and OPS.  The coefficients will define the shape of the relationship.  
+
+```{r}
+df <- 3
+
+age_min <- hit$centered_age |> 
+  min() |> 
+  floor()
+
+age_max <- hit$centered_age |> 
+  max() |> 
+  ceiling()
+
+age_range <- seq(age_min, age_max, length.out = 500)
 
 spline_model <- age_range |> 
   bs(df = df)
@@ -113,17 +162,63 @@ hit |>
   geom_line()
 ```
 
+# Model 1
+
+This model describes the player `OPS` as a function of age (via the splines) and player.  The player `name` is a random effect in the model.
+
+Random effects in statistics are a good way to include categorical variables with many levels as predictors.
+
 ```{r}
-form1 <- ops ~ (spline1 + spline2 + spline3 | name) + spline1 + spline2 + spline3
-model1 <- lmer(form1, hit)
+model1 <- lmer(
+  ops ~ (1 | name) + spline1 + spline2 + spline3,
+  data = hit
+)
+
 model1
 ```
 
 ```{r}
-mean_player <- tibble(age = 19:40, centered_age = age - mean(hit$age)) |> 
+pal <- ggsci::pal_d3()(2)
+
+mean_player <- tibble(age = age_range + mean(hit$age), centered_age = age_range) |> 
   add_splines(spline_model) |> 
   add_prediction(model1, re.form = ~0)
+
+mean_player |> 
+  ggplot() + 
+  aes(age, pred_ops) + 
+  geom_line(color = pal[1])
 ```
+
+Calculate the age of peak OPS.
+
+```{r}
+predict_ops <- function(age, spline_model, reg_model) {
+  tibble(centered_age = age - mean(hit$age)) |> 
+    add_splines(spline_model) |> 
+    add_prediction(reg_model, re.form = ~0) |> 
+    pull(pred_ops)
+}
+
+calc_ops_deriv <- function(age, spline_model, reg_model) {
+  fderiv(
+    partial(predict_ops, spline_model = spline_model, reg_model = reg_model),
+    age
+  )
+}
+
+calc_zero_deriv <- function(spline_model, reg_model) {
+  fzero(
+    partial(calc_ops_deriv, spline_model = spline_model, reg_model = reg_model),
+    30
+  )$x
+}
+
+calc_zero_deriv(spline_model, model1) |> 
+  cat()
+```
+
+# Aggregation
 
 ```{r}
 grouped_hit <- hit |> 
@@ -135,7 +230,7 @@ grouped_hit <- hit |>
     age_28_pa = if (any(age_28_season)) mean(pa[age_28_season]) else NA
   ) |> 
   ungroup() |> 
-  group_by(age = floor(age)) |> 
+  group_by(age = round(age)) |> 
   mutate(player_contribution = pa / sum(pa)) 
 
 aggregate_player <- grouped_hit |> 
@@ -143,15 +238,17 @@ aggregate_player <- grouped_hit |>
     across(c(avg, obp, slg, ops), \(x) weighted.mean(x, pa)),
     age_28_ops = weighted.mean(age_28_ops, age_28_pa, na.rm = TRUE),
     .groups = "drop"
-  )
+  ) |> 
+  mutate(centered_age = age - mean(hit$age), name = NA_character_) |> 
+  add_splines(spline_model) |> 
+  add_prediction(model1, allow.new.levels = TRUE)
 
 aggregate_player
 ```
 ```{r}
 aggregate_player |> 
-  ggplot() + 
-  aes(age, ops) + 
-  geom_line()
+  ggplot() + aes(age, ops) + geom_line(color = pal[2]) +
+  labs(title = "ops aggregated by player age")
 ```
 ```{r}
 grouped_hit |> 
@@ -161,14 +258,36 @@ grouped_hit |>
 ```
 
 ```{r}
-aging <- mean_player |> 
-  left_join(aggregate_player, by = "age") 
+grouped_hit |> 
+  filter(age == 19) |> 
+  slice_max(player_contribution, n = 5) |> 
+  select(age, name, player_contribution) |> 
+  tabulate(
+    columns = list(
+      name = colDef(minWidth = 150),
+      player_contribution = colDef("player contribution", format = colFormat(percent = TRUE, digits = 1)))
+  )
 ```
 
 ```{r}
-aging |> 
+grouped_hit |> 
+  filter(age == 39) |> 
+  slice_max(player_contribution, n = 5) |> 
+  select(age, name, player_contribution) |> 
+  tabulate(
+    columns = list(
+      name = colDef(minWidth = 150),
+      player_contribution = colDef("player contribution", format = colFormat(percent = TRUE, digits = 1))
+    )
+  )
+```
+
+```{r}
+aggregate_player |> 
   select(age, modeled = pred_ops, aggregate = ops) |> 
   pivot_longer(-age) |> 
-  ggplot() + aes(age, value, color = name) + geom_line()
+  mutate(name = factor(name, c("modeled", "aggregate"))) |> 
+  ggplot() + aes(age, value, color = name) + geom_line() + scale_color_d3() +
+  labs(y = "ops", title = "modeled and aggregate ops aging")
 ```
 
