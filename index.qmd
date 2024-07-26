@@ -6,6 +6,8 @@ editor: source
 embed-resources: true
 fig-format: svg
 code-fold: false
+toc: true
+toc-location: left
 ---
 
 ![](data/player_aging2.png)
@@ -28,14 +30,7 @@ This is just a hobby project.
   - `quarto` (publishing documents from code)
   - `GitHub Pages` (hosting code and web pages)
 
-# Code
-
-The code in this html report is folded by default.  You may click on the |> Code icons to reveal it.
-
-The data loaded by this notebook was first prepared in a separate script that you may find in the code repository: `query_mlb.R`.
-
-
-# Load packages and data
+# Dependencies
 
 ```{r load-packages}
 #| warning: false
@@ -106,6 +101,8 @@ I include
   - seasons with at least 200 plate appearances
   - and hitters with at least 5 seasons 
 
+The data loaded by this notebook was first prepared in a separate script that you may find in the code repository: `query_mlb.R`.
+
 ```{r}
 hit <- hit |> 
   filter(n_seasons >= 5) 
@@ -157,12 +154,10 @@ hit <- hit |>
 hit |> 
   select(age, contains("spline")) |> 
   pivot_longer(-age) |> 
-  ggplot() + 
-  aes(age, value, color = name) + 
-  geom_line()
+  ggplot() + aes(age, value, color = name) + geom_line() + labs(title = "splines")
 ```
 
-# Model 1
+# Model
 
 This model describes the player `OPS` as a function of age (via the splines) and player.  The player `name` is a random effect in the model.
 
@@ -178,16 +173,14 @@ model1
 ```
 
 ```{r}
-pal <- ggsci::pal_d3()(2)
+pal <- pal_d3()(2)
 
 mean_player <- tibble(age = age_range + mean(hit$age), centered_age = age_range) |> 
   add_splines(spline_model) |> 
   add_prediction(model1, re.form = ~0)
 
 mean_player |> 
-  ggplot() + 
-  aes(age, pred_ops) + 
-  geom_line(color = pal[1])
+  ggplot() + aes(age, pred_ops) + geom_line(color = pal[1]) + labs(title = "modeled aging curve", y = "ops")
 ```
 
 Calculate the age of peak OPS.
@@ -274,7 +267,7 @@ tabulate_one_age(38)
 tabulate_one_age(39)
 ```
 
-# Comparing the aggregate and modeled aging curves
+# Model/aggregate comparison
 
 ```{r}
 aging <- aggregate_player |> 
