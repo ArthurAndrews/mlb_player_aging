@@ -173,15 +173,57 @@ model1
 ```
 
 ```{r}
+model2 <- lmer(
+  ops ~ (1 | name) + bs(centered_age, df = df),
+  data = hit
+)
+
+model2
+```
+
+```{r}
+bind_cols(
+  hit |> 
+    select(age),
+  hit$centered_age |> 
+    bs(df)
+) |> 
+  pivot_longer(-age, names_to = "spline") |> 
+  ggplot() + aes(age, value, color = spline) + geom_line()
+```
+
+```{r}
 pal <- pal_d3()(2)
 
 mean_player <- tibble(age = age_range + mean(hit$age), centered_age = age_range) |> 
   add_splines(spline_model) |> 
   add_prediction(model1, re.form = ~0)
 
+mean_player <- tibble(age = age_range + mean(hit$age), centered_age = age_range) |> 
+  add_prediction(model2, re.form = ~0)
+
 mean_player |> 
-  ggplot() + aes(age, pred_ops) + geom_line(color = pal[1]) + labs(title = "modeled aging curve", y = "ops")
+  ggplot() + aes(age, pred_ops) + geom_line(color = pal[1]) + labs(title = "modeled aging curve", y = "ops") +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.001))
 ```
+
+# Model coefficients
+
+```{r}
+model1 |> 
+  tidy("fixed") |> 
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |> 
+  tabulate()
+```
+
+```{r}
+model1 |> 
+  tidy("ran_vals") |> 
+  mutate(across(where(is.numeric), \(x) round(x, 3))) |> 
+  arrange(desc(estimate)) |> 
+  tabulate(columns = list(level = colDef(minWidth = 150)))
+```
+
 
 Calculate the age of peak OPS.
 
@@ -208,6 +250,28 @@ calc_zero_deriv <- function(spline_model, reg_model) {
 }
 
 calc_zero_deriv(spline_model, model1) |> 
+  cat()
+```
+
+```{r}
+predict_ops <- function(age, model) {
+  tibble(centered_age = age - mean(hit$age)) |> 
+    predict(object = model, re.form = ~0)
+}
+
+calc_ops_deriv <- function(age, model) {
+  partial(predict_ops, model = model) |> # now a function of only age
+    fderiv(age)
+}
+
+calc_zero_deriv <- function(model) {
+  partial(calc_ops_deriv, model = model) |> # now a function of only age
+    fzero(x = 30) |> 
+    pluck("x")
+}
+
+model2 |> 
+  calc_zero_deriv() |> 
   cat()
 ```
 
@@ -251,7 +315,9 @@ tabulate_one_age <- function(ages) {
         player_contribution = colDef("player contribution", format = colFormat(percent = TRUE, digits = 1)))
     )  
 }
-
+```
+::: {layout-ncol=2}
+```{r}
 tabulate_one_age(20)
 ```
 
@@ -259,6 +325,9 @@ tabulate_one_age(20)
 tabulate_one_age(21)
 ```
 
+:::
+
+::: {layout-ncol=2}
 ```{r}
 tabulate_one_age(38)
 ```
@@ -266,6 +335,8 @@ tabulate_one_age(38)
 ```{r}
 tabulate_one_age(39)
 ```
+
+:::
 
 # Model/aggregate comparison
 
@@ -281,5 +352,9 @@ aging |>
   mutate(name = factor(name, c("modeled", "aggregate"))) |> 
   ggplot() + aes(age, value, color = name) + geom_line() + scale_color_d3() +
   labs(y = "ops", title = "modeled and aggregate ops aging")
+```
+
+```{r}
+
 ```
 
