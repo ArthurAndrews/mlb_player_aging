@@ -9,7 +9,7 @@ library(magrittr, include.only = "divide_by")
 
 
 # query hitter stats
-hitter <- tibble(season = 2010:2023) |> 
+hitter <- tibble(season = 2005:2023) |> 
   pmap(
     partial(mlb_stats, stat_type = "season", stat_group = "hitting", player_pool = "All")
   ) |> 
@@ -76,4 +76,4 @@ hit <- hitter |>
   )
 
 # save
-save(hitter, player, hit, file = "../data/hitting_stats.RData")
+save(hitter, player, hit, file = "data/hitting_stats.RData")

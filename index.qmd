@@ -128,34 +128,8 @@ I will use three B-splines to provide a flexible basis for describing the nonlin
 
 Each of these splines is a smooth function of player age, and by including the split fits as predictor variables in a model, the model will be able to describe a nonlinear relationship between age and OPS.  The coefficients will define the shape of the relationship.  
 
-```{r}
-df <- 3
+With the `splines` package, the spline definition can very conveniently go inside the model formula.
 
-age_min <- hit$centered_age |> 
-  min() |> 
-  floor()
-
-age_max <- hit$centered_age |> 
-  max() |> 
-  ceiling()
-
-age_range <- seq(age_min, age_max, length.out = 500)
-
-spline_model <- age_range |> 
-  bs(df = df)
-```
-
-```{r}
-hit <- hit |> 
-  add_splines(spline_model)
-```
-
-```{r}
-hit |> 
-  select(age, contains("spline")) |> 
-  pivot_longer(-age) |> 
-  ggplot() + aes(age, value, color = name) + geom_line() + labs(title = "splines")
-```
 
 # Model
 
@@ -165,45 +139,34 @@ Random effects in statistics are a good way to include categorical variables wit
 
 ```{r}
 model1 <- lmer(
-  ops ~ (1 | name) + spline1 + spline2 + spline3,
+  ops ~ (1 | name) + bs(centered_age, df = 3),
   data = hit
 )
 
 model1
 ```
 
-```{r}
-model2 <- lmer(
-  ops ~ (1 | name) + bs(centered_age, df = df),
-  data = hit
-)
-
-model2
-```
+## Visualize the spline functions
 
 ```{r}
 bind_cols(
   hit |> 
     select(age),
   hit$centered_age |> 
-    bs(df)
+    bs(3)
 ) |> 
   pivot_longer(-age, names_to = "spline") |> 
   ggplot() + aes(age, value, color = spline) + geom_line()
 ```
 
 ```{r}
-pal <- pal_d3()(2)
+pal <- pal_d3()(10)
 
-mean_player <- tibble(age = age_range + mean(hit$age), centered_age = age_range) |> 
-  add_splines(spline_model) |> 
+mean_player <- hit |> 
   add_prediction(model1, re.form = ~0)
 
-mean_player <- tibble(age = age_range + mean(hit$age), centered_age = age_range) |> 
-  add_prediction(model2, re.form = ~0)
-
 mean_player |> 
-  ggplot() + aes(age, pred_ops) + geom_line(color = pal[1]) + labs(title = "modeled aging curve", y = "ops") +
+  ggplot() + aes(age, pred_ops) + geom_line(color = pal[2]) + labs(title = "modeled aging curve", y = "ops") +
   scale_y_continuous(labels = scales::label_number(accuracy = 0.001))
 ```
 
@@ -216,6 +179,8 @@ model1 |>
   tabulate()
 ```
 
+The random effect intercept is the +/- of each player's aging curve relative to the mean player.  Unsurprisingly, tabulating these players by decreasing coefficients lists the greatest hitters of the era.
+
 ```{r}
 model1 |> 
   tidy("ran_vals") |> 
@@ -225,33 +190,7 @@ model1 |>
 ```
 
 
-Calculate the age of peak OPS.
-
-```{r}
-predict_ops <- function(age, spline_model, reg_model) {
-  tibble(centered_age = age - mean(hit$age)) |> 
-    add_splines(spline_model) |> 
-    add_prediction(reg_model, re.form = ~0) |> 
-    pull(pred_ops)
-}
-
-calc_ops_deriv <- function(age, spline_model, reg_model) {
-  fderiv(
-    partial(predict_ops, spline_model = spline_model, reg_model = reg_model),
-    age
-  )
-}
-
-calc_zero_deriv <- function(spline_model, reg_model) {
-  fzero(
-    partial(calc_ops_deriv, spline_model = spline_model, reg_model = reg_model),
-    30
-  )$x
-}
-
-calc_zero_deriv(spline_model, model1) |> 
-  cat()
-```
+Calculate the age of peak OPS by numerically solving for the zero of the 1st derivative with respect to age.
 
 ```{r}
 predict_ops <- function(age, model) {
@@ -277,9 +216,9 @@ model2 |>
 
 # Aggregation
 
-Instead of performing the more complex steps of engineering the splines and fitting the statistical model, it might be tempting to simply average OPS by player age to see the aging curve.
+Instead of performing the more complex steps of engineering the splines and fitting the statistical model, it might be tempting to simply average OPS by player age to see the aging curve.  
 
-This is what it looks like.
+This requires no statistics, but we'll quickly find a problem.
 
 ```{r}
 grouped_hit <- hit |> 
@@ -295,7 +234,7 @@ aggregate_player <- grouped_hit |>
 
 ```{r}
 aggregate_player |> 
-  ggplot() + aes(age, ops) + geom_line(color = pal[2]) +
+  ggplot() + aes(age, ops) + geom_line(color = pal[1]) +
   labs(title = "ops aggregated by player age")
 ```
 
@@ -316,6 +255,7 @@ tabulate_one_age <- function(ages) {
     )  
 }
 ```
+
 ::: {layout-ncol=2}
 ```{r}
 tabulate_one_age(20)
@@ -349,12 +289,77 @@ aging <- aggregate_player |>
 aging |> 
   select(age, modeled = pred_ops, aggregate = ops) |> 
   pivot_longer(-age) |> 
-  mutate(name = factor(name, c("modeled", "aggregate"))) |> 
+  mutate(name = factor(name, c("aggregate", "modeled"))) |> 
   ggplot() + aes(age, value, color = name) + geom_line() + scale_color_d3() +
   labs(y = "ops", title = "modeled and aggregate ops aging")
 ```
 
 ```{r}
+model2 <- lmer(
+  ops ~ (centered_age | name) + bs(centered_age, df = 3),
+  data = hit
+) 
 
+model2
+```
+
+
+```{r}
+cf <- model2 |> 
+  tidy("ran_vals") |> 
+  filter(term == "centered_age") |> 
+  mutate(across(where(is.numeric), \(x) round(x, 4))) |> 
+  arrange(desc(estimate)) 
+
+cf |> 
+  tabulate(columns = list(level = colDef(minWidth = 150)))
+```
+
+
+```{r}
+predict_player <- function(players, model) {
+  
+  mean_player <- hit |> 
+    distinct(age, centered_age) |> 
+    mutate(
+      mean_player = tibble(centered_age) |> 
+        predict(object = model, re.form = ~0)
+    )
+  
+  hit |> 
+    filter(name %in% players) |> 
+    left_join(cf, by = join_by(name == level)) |> 
+    mutate(
+      player = tibble(name, age, centered_age) |> 
+        predict(object = model),
+      name = name |> 
+        reorder(-abs(estimate))
+    ) |> 
+    ggplot() + 
+    aes(x = age, color = "player") + geom_point(aes(y = ops)) + geom_line(aes(y = player)) +
+    geom_line(aes(x = age, y = mean_player, color = "mean_player"), data = mean_player) +
+    scale_color_manual(values = c("player" = "grey30", "mean_player" = pal[2])) +
+    facet_wrap(~name + estimate)
+}
+
+predict_player("Miguel Cabrera", model2)
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8
+cf |> 
+  slice_max(estimate, n = 16) |> 
+  pull(level) |> 
+  predict_player(model2)
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8
+cf |> 
+  slice_min(estimate, n = 16) |> 
+  pull(level) |> 
+  predict_player(model2)
 ```
 
