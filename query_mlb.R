@@ -16,7 +16,6 @@ hitter <- tibble(season = 2005:2023) |>
   bind_rows() |> 
   filter(at_bats > 200)
 
-
 # get unique ids
 ids <- hitter |> 
   drop_na(player_id) |> 
@@ -27,7 +26,6 @@ ids <- hitter |>
 # this fails.  i think the vector of ids is too long and the API complains.
 # player <- ids |> 
 #   mlb_people()
-
 
 # query in chunks instead
 player <- hitter |> 

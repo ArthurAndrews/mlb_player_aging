@@ -5,9 +5,14 @@ format: html
 editor: source
 embed-resources: true
 fig-format: svg
-code-fold: false
+fig-width: 10
+fig-height: 6
+code-fold: show
+code-tools: true
 toc: true
 toc-location: left
+grid: 
+  body-width: "9in"
 ---
 
 ![](data/player_aging2.png)
@@ -21,14 +26,18 @@ toc-location: left
   
 # Purpose
 
-This is just a hobby project.
+This is a hobby project.
 
 # Tools
 
-  - `R` (programming language)
-  - `baseballr` (an R interface to MLB data)
-  - `quarto` (publishing documents from code)
-  - `GitHub Pages` (hosting code and web pages)
+  - **R** - *programming language*
+  - **baseballr** - *an R interface to MLB data*
+  - **quarto** - *publishing data-rich documents from code*
+  - **GitHub Pages** - *hosting code and web pages*
+
+# Code
+
+By default, the R code is displayed.  If you wish, you may hide it from the "Code" menu in the top-right.
 
 # Dependencies
 
@@ -88,7 +97,7 @@ add_prediction <- function(hit, model, ...) {
 
 tabulate <- partial(
   reactable,
-  fullWidth = FALSE, highlight = TRUE, style = css(fontSize = "90%")
+  fullWidth = FALSE, highlight = TRUE, style = css(fontSize = "80%")
 )
 ```
 
@@ -166,7 +175,8 @@ mean_player <- hit |>
   add_prediction(model1, re.form = ~0)
 
 mean_player |> 
-  ggplot() + aes(age, pred_ops) + geom_line(color = pal[2]) + labs(title = "modeled aging curve", y = "ops") +
+  ggplot() + aes(age, pred_ops) + geom_line(color = pal[2]) + 
+  labs(title = "modeled aging curve", y = "ops") +
   scale_y_continuous(labels = scales::label_number(accuracy = 0.001))
 ```
 
@@ -209,7 +219,7 @@ calc_zero_deriv <- function(model) {
     pluck("x")
 }
 
-model2 |> 
+model1 |> 
   calc_zero_deriv() |> 
   cat()
 ```
@@ -251,7 +261,11 @@ tabulate_one_age <- function(ages) {
     tabulate(
       columns = list(
         name = colDef(minWidth = 150),
-        player_contribution = colDef("player contribution", format = colFormat(percent = TRUE, digits = 1)))
+        player_contribution = colDef(
+          "player contribution", 
+          format = colFormat(percent = TRUE, digits = 1)
+        )
+      )
     )  
 }
 ```
@@ -282,9 +296,11 @@ tabulate_one_age(39)
 
 ```{r}
 aging <- aggregate_player |> 
-  mutate(centered_age = age - mean(hit$age), name = NA_character_) |> 
-  add_splines(spline_model) |> 
-  add_prediction(model1, allow.new.levels = TRUE)
+  mutate(
+    centered_age = age - mean(hit$age), 
+    pred_ops = tibble(centered_age) |> 
+      predict(object = model1, re.form = ~0)
+  ) 
 
 aging |> 
   select(age, modeled = pred_ops, aggregate = ops) |> 
@@ -293,6 +309,16 @@ aging |>
   ggplot() + aes(age, value, color = name) + geom_line() + scale_color_d3() +
   labs(y = "ops", title = "modeled and aggregate ops aging")
 ```
+
+# A more complex model
+
+By including a random slope for `centered_age`, we can allow different players to have different aging curves.
+
+The partial pooling of mixed effects models is really nice for this, because it will penalize really extreme values of this slope.  To me, this is a desirable feature - to keep the slopes realistic, even for players with a smaller amount of data.
+
+Typically, including a random slope requires also adding a corresponding fixed effect.  In this case, however, I will rely on the spline fits to fill the role of the fixed effect.  This will maintain the population mean `centered_age` slope at zero.  
+
+Each player will be given a `centered_age` coefficient which modifies their aging curve.  
 
 ```{r}
 model2 <- lmer(
@@ -303,6 +329,8 @@ model2 <- lmer(
 model2
 ```
 
+
+Looking at the players with the most extreme values of the `centered_age` coefficient is interest: it reveals the players whose performance "aged" the fastest (negative values) and slowest (positive values).
 
 ```{r}
 cf <- model2 |> 
@@ -315,6 +343,8 @@ cf |>
   tabulate(columns = list(level = colDef(minWidth = 150)))
 ```
 
+
+In some cases, players aging faster than average is due to historically high peaks.  
 
 ```{r}
 predict_player <- function(players, model) {
@@ -345,21 +375,36 @@ predict_player <- function(players, model) {
 predict_player("Miguel Cabrera", model2)
 ```
 
-```{r}
-#| fig-width: 10
-#| fig-height: 8
-cf |> 
-  slice_max(estimate, n = 16) |> 
-  pull(level) |> 
-  predict_player(model2)
-```
+## Players aging gracefully
+
+Here are the aging curves for the 16 players with the slowing aging.
 
 ```{r}
 #| fig-width: 10
 #| fig-height: 8
 cf |> 
-  slice_min(estimate, n = 16) |> 
+  slice_max(estimate, n = 16, with_ties = FALSE) |> 
   pull(level) |> 
   predict_player(model2)
 ```
 
+## Players aging rapidly 
+
+Here are the aging curves for the 16 players with the most rapid aging.
+
+In many cases, these were players with All-Star 20's, but average or below-average 30's.
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8
+cf |> 
+  slice_min(estimate, n = 16, with_ties = FALSE) |> 
+  pull(level) |> 
+  predict_player(model2)
+```
+
+# Conclusions
+
+Splines and mixed effects models are a great choice for studying the aging of MLB player performance.
+
+The splines can describe a nonlinear aging curve, and mixed effects models are ideal for working with categorical variables (in this case, player) with many levels.
