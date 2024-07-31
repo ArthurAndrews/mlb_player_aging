@@ -32,17 +32,21 @@ This is a hobby project.
 
 ::: {layout-ncol=4}
 
-![](data/R_logo.svg.png){width="15%"}
-![](data/baseballr_logo.png){width="15%"}
-![](data/logo-quarto.png){width="15%"}
-![](data/github-pages-examples.png){width="15%"}
+![](data/R_logo.svg.png){width="50%"}
+
+![](data/baseballr_logo.png){width="50%"}
+
+![](data/logo-quarto.png){width="50%"}
+
+![](data/github-pages-examples.png){width="50%"}
+
+::::
 
   - **R** - *programming language*
   - **baseballr** - *an R interface to MLB data*
   - **quarto** - *publishing data-rich documents from code*
   - **GitHub Pages** - *hosting code and web pages*
 
-:::
 
 # Code
 
