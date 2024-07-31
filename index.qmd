@@ -15,7 +15,7 @@ grid:
   body-width: "9in"
 ---
 
-![](data/player_aging2.png)
+![](data/player_aging3.png)
 
 # Goals
 
@@ -30,10 +30,19 @@ This is a hobby project.
 
 # Tools
 
+::: {layout-ncol=4}
+
+![](data/R_logo.svg.png){width="15%"}
+![](data/baseballr_logo.png){width="15%"}
+![](data/logo-quarto.png){width="15%"}
+![](data/github-pages-examples.png){width="15%"}
+
   - **R** - *programming language*
   - **baseballr** - *an R interface to MLB data*
   - **quarto** - *publishing data-rich documents from code*
   - **GitHub Pages** - *hosting code and web pages*
+
+:::
 
 # Code
 
@@ -67,28 +76,9 @@ load("data/hitting_stats.RData")
 
 # Declare functions
 
-For predicting with a spline function and predicting with the stats model.
+For adding model predictions to a data frame and tabulating results in html tables.
 
 ```{r functions}
-predict_splines <- function(x, model) {
-  x |> 
-    predict(object = model) |> 
-    as_tibble() |> 
-    mutate(across(everything(), as.numeric)) |> 
-    rename_with(.fn = \(x) str_c("spline", x))    
-}
-
-
-add_splines <- function(hit, model) {
-  hit |> 
-    select(-contains("spline")) |> 
-    bind_cols(
-      hit$centered_age |> 
-        predict_splines(model)
-    )
-}
-
-
 add_prediction <- function(hit, model, ...) {
   hit$pred_ops <- predict(model, hit, ...)
   hit
@@ -104,7 +94,7 @@ tabulate <- partial(
 
 # Data set
 
-I accessed MLB hitter data from 2005 - 2023 using the excellent `baseballr` package, which offers convenient interfaces to the Statscast APIs to Baseball Reference data.
+I accessed MLB hitter data from 2005 - 2023 using the excellent `baseballr` package, which offers convenient interfaces to the Statcast APIs to Baseball Reference data.
 
 I include 
   - seasons with at least 200 plate appearances
@@ -140,6 +130,19 @@ Each of these splines is a smooth function of player age, and by including the s
 With the `splines` package, the spline definition can very conveniently go inside the model formula.
 
 
+## Visualize the spline functions
+
+```{r}
+bind_cols(
+  hit |> 
+    select(age),
+  hit$centered_age |> 
+    bs(3)
+) |> 
+  pivot_longer(-age, names_to = "spline") |> 
+  ggplot() + aes(age, value, color = spline) + geom_line()
+```
+
 # Model
 
 This model describes the player `OPS` as a function of age (via the splines) and player.  The player `name` is a random effect in the model.
@@ -155,18 +158,7 @@ model1 <- lmer(
 model1
 ```
 
-## Visualize the spline functions
-
-```{r}
-bind_cols(
-  hit |> 
-    select(age),
-  hit$centered_age |> 
-    bs(3)
-) |> 
-  pivot_longer(-age, names_to = "spline") |> 
-  ggplot() + aes(age, value, color = spline) + geom_line()
-```
+We can predict the aging curve for an average player by including only the model's fixed effects.  We can see an increase in performance until the player's late 20's and then a steeper decrease in their mid-30's.
 
 ```{r}
 pal <- pal_d3()(10)
@@ -182,6 +174,10 @@ mean_player |>
 
 # Model coefficients
 
+## Fixed effects
+
+These coefficients are what form the modeled aging curve.
+
 ```{r}
 model1 |> 
   tidy("fixed") |> 
@@ -189,18 +185,23 @@ model1 |>
   tabulate()
 ```
 
+## Random effects
+
 The random effect intercept is the +/- of each player's aging curve relative to the mean player.  Unsurprisingly, tabulating these players by decreasing coefficients lists the greatest hitters of the era.
+
+You may wish to sort this table by `estimate` or search for a player name in the `level` search box.
 
 ```{r}
 model1 |> 
   tidy("ran_vals") |> 
   mutate(across(where(is.numeric), \(x) round(x, 3))) |> 
   arrange(desc(estimate)) |> 
-  tabulate(columns = list(level = colDef(minWidth = 150)))
+  tabulate(columns = list(level = colDef(minWidth = 150, filterable = TRUE)))
 ```
 
+## Calculating the age of peack performance
 
-Calculate the age of peak OPS by numerically solving for the zero of the 1st derivative with respect to age.
+To calculate the age of peak OPS, we can numerically solving for the zero of the 1st derivative with respect to age.  
 
 ```{r}
 predict_ops <- function(age, model) {
@@ -218,6 +219,8 @@ calc_zero_deriv <- function(model) {
     fzero(x = 30) |> 
     pluck("x")
 }
+
+cat("age of peak performance: ")
 
 model1 |> 
   calc_zero_deriv() |> 
@@ -344,7 +347,7 @@ cf |>
 ```
 
 
-In some cases, players aging faster than average is due to historically high peaks.  
+In some cases, players aging faster than average is due to historically high peaks, like Miguel Cabrera. 
 
 ```{r}
 predict_player <- function(players, model) {
@@ -375,9 +378,14 @@ predict_player <- function(players, model) {
 predict_player("Miguel Cabrera", model2)
 ```
 
+
+
 ## Players aging gracefully
 
-Here are the aging curves for the 16 players with the slowing aging.
+Here are the aging curves for the 16 players with the slowing aging.  Nelson Cruz and Adrian Beltre have the largest positive slopes, and this fits their reputation as late-bloomers.  Jim Thome and David Ortiz remained star players into their late 30's and early 40's.  Jose Altuve and Freddie Freeman are still active players, but are posting peak stats in their mid-30's.
+
+Because I only included data from 2005 - 2023 in my analysis, the early years of some player's careers are missing.
+
 
 ```{r}
 #| fig-width: 10
@@ -390,7 +398,7 @@ cf |>
 
 ## Players aging rapidly 
 
-Here are the aging curves for the 16 players with the most rapid aging.
+Here are the aging curves for the 16 players with the most rapid aging.  Perhaps speculation on my part, but many of these players were pure power hitters with stout and muscular builds.
 
 In many cases, these were players with All-Star 20's, but average or below-average 30's.
 
@@ -408,3 +416,5 @@ cf |>
 Splines and mixed effects models are a great choice for studying the aging of MLB player performance.
 
 The splines can describe a nonlinear aging curve, and mixed effects models are ideal for working with categorical variables (in this case, player) with many levels.
+
+Including an additional random effect slope for player age elegantly describes a range or spectrum of aging curves, and the results from the model seem consistent with baseball wisdom.
